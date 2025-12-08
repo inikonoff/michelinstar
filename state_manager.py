@@ -7,8 +7,6 @@ class StateManager:
     def __init__(self):
         # Словарь для хранения истории: {user_id: [messages]}
         self.user_history: Dict[int, List[Dict]] = {}
-        # Словарь для хранения уровня сложности: {user_id: difficulty}
-        self.user_difficulty: Dict[int, str] = {}
     
     def add_message(self, user_id: int, role: str, text: str):
         """Добавляет сообщение в историю пользователя"""
@@ -58,8 +56,6 @@ class StateManager:
         """Очищает историю пользователя"""
         if user_id in self.user_history:
             del self.user_history[user_id]
-        if user_id in self.user_difficulty:
-            del self.user_difficulty[user_id]
     
     def get_context_for_groq(self, user_id: int) -> str:
         """Формирует контекст для передачи в Groq"""
@@ -71,14 +67,6 @@ class StateManager:
             context_parts.append(f"{role_label}: {msg['text']}")
         
         return "\n\n".join(context_parts)
-    
-    def set_difficulty(self, user_id: int, difficulty: str):
-        """Устанавливает уровень сложности для пользователя"""
-        self.user_difficulty[user_id] = difficulty
-    
-    def get_difficulty(self, user_id: int) -> str:
-        """Получает уровень сложности пользователя (по умолчанию 'средний')"""
-        return self.user_difficulty.get(user_id, "средний")
 
 # Глобальный экземпляр менеджера состояний
 state_manager = StateManager()
