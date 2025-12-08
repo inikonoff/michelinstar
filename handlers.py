@@ -43,7 +43,8 @@ async def cmd_start(message: Message):
 
 async def cmd_author(message: Message):
     await message.answer(
-        "👨‍💻 <b>Разработчик бота:</b> @inikonoff",
+        "👨‍💻 <b>Разработчик бота:</b> @inikonoff\n\n"
+        "Пишите по вопросам и предложениям!",
         parse_mode="HTML"
     )
 
@@ -90,6 +91,7 @@ async def handle_voice(message: Message):
         if not history:
             await handle_initial_products(message, user_id, text)
         else:
+            # Передаем явно параметры, так как вызываем вручную
             await handle_user_choice(message, user_id, text)
             
     except Exception as e:
@@ -128,8 +130,6 @@ async def handle_style_selection_callback(callback: CallbackQuery):
         state_manager.add_message(user_id, "bot", response)
         
         await callback.message.delete()
-        
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ: Добавляем кнопку "Заново" под списком блюд ---
         await callback.message.answer(response, reply_markup=get_restart_keyboard())
         
     except Exception as e:
@@ -137,10 +137,18 @@ async def handle_style_selection_callback(callback: CallbackQuery):
 
 # --- ВЫБОР БЛЮДА ИЛИ ДОБАВЛЕНИЕ ---
 
-async def handle_user_choice(message: Message, user_id: int, text: str):
+# ИСПРАВЛЕНИЕ ЗДЕСЬ: Аргументы сделаны необязательными
+async def handle_user_choice(message: Message, user_id: int = None, text: str = None):
+    # Если вызвал Aiogram (текстовое сообщение), аргументов не будет
+    if user_id is None:
+        user_id = message.from_user.id
+    if text is None:
+        text = message.text
+
     last_bot_msg = state_manager.get_last_bot_message(user_id)
     
     if not last_bot_msg:
+        # Если истории нет, считаем это первым вводом продуктов
         await handle_initial_products(message, user_id, text)
         return
 
@@ -168,7 +176,6 @@ async def handle_dish_selection(message: Message, user_id: int, dish_name: str):
         
         await wait_msg.delete()
         
-        # Используем хелпер для клавиатуры
         kb = get_restart_keyboard()
         
         if image_url:
@@ -191,7 +198,6 @@ async def handle_add_products(message: Message, user_id: int, new_products: str)
         state_manager.add_message(user_id, "bot", response)
         await wait_msg.delete()
         
-        # Здесь тоже можно добавить кнопку рестарта, чтобы было удобно
         await message.answer(response, reply_markup=get_restart_keyboard())
         
     except Exception as e:
