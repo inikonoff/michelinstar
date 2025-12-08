@@ -6,14 +6,13 @@ from utils import VoiceProcessor
 from groq_service import GroqService
 from state_manager import state_manager
 
-# Инициализация сервисов (ImageService убрали)
+# Инициализация
 voice_processor = VoiceProcessor()
 groq_service = GroqService()
 
 # --- ВСПОМОГАТЕЛЬНЫЕ КЛАВИАТУРЫ ---
 
 def get_style_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура выбора стиля"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🏠 Простое / Домашнее", callback_data="style_ordinary"),
@@ -22,13 +21,11 @@ def get_style_keyboard() -> InlineKeyboardMarkup:
     ])
 
 def get_restart_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура с кнопкой рестарта"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Заново", callback_data="restart")]
     ])
 
 def get_hide_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для скрытия рецепта"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🗑 Скрыть", callback_data="delete_msg")]
     ])
@@ -38,6 +35,7 @@ def get_hide_keyboard() -> InlineKeyboardMarkup:
 async def cmd_start(message: Message):
     user_id = message.from_user.id
     state_manager.clear_history(user_id)
+    state_manager.clear_state(user_id)
     await message.answer(
         "👋 Здравствуйте.\n\n"
         "🎤 <b>Отправьте</b> голосовое или текстовое сообщение с перечнем продуктов, и я подскажу, что из них можно приготовить.\n"
@@ -47,12 +45,12 @@ async def cmd_start(message: Message):
 
 async def cmd_author(message: Message):
     await message.answer(
-        "👨‍💻 <b>Разработчик бота:</b> @inikonoff\n\n"
-        "Пишите по вопросам и предложениям!",
+        "👨‍💻 <b>Автор бота:</b> @inikonoff",
         parse_mode="HTML"
     )
 
 async def handle_easter_egg_recipe(message: Message):
+    user_id = message.from_user.id
     dish_name = message.text.lower().replace("дай рецепт", "", 1).strip()
     if not dish_name:
         await message.answer("Напиши название блюда. Например: <b>Дай рецепт Пицца</b>")
@@ -62,10 +60,8 @@ async def handle_easter_egg_recipe(message: Message):
     try:
         recipe = await groq_service.generate_freestyle_recipe(dish_name)
         await wait_msg.delete()
-        
-        # Просто отправляем текст рецепта
-        await message.answer(recipe, reply_markup=get_hide_keyboard())
-
+        await message.answer(recipe, reply_markup=get_hide_keyboard(), parse_mode="HTML")
+        state_manager.set_state(user_id, "recipe_sent")
     except Exception as e:
         await wait_msg.delete()
         await message.answer(f"Ошибка: {e}")
@@ -100,7 +96,20 @@ async def handle_voice(message: Message):
             except: pass
 
 async def handle_initial_products(message: Message, user_id: int, products: str):
+    # 1. ВАЛИДАЦИЯ: Проверяем, еда ли это вообще
+    is_valid = await groq_service.validate_ingredients(products)
+    
+    if not is_valid:
+        await message.answer(
+            f"🤨 <b>\"{products}\"</b> — это не похоже на список продуктов для готовки.\n\n"
+            "Перечислите ингредиенты, например: <i>Курица, картошка, лук</i>.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Если валидация прошла успешно
     state_manager.add_message(user_id, "user", products)
+    state_manager.clear_state(user_id)
     
     await message.answer(
         f"✅ Принято: <b>{products}</b>\n\n"
@@ -141,6 +150,17 @@ async def handle_user_choice(message: Message, user_id: int = None, text: str = 
     if text is None:
         text = message.text
 
+    # --- ПРОВЕРКА НА СПАСИБО (с учетом опечаток) ---
+    # Добавили мпасибо и другие частые опечатки
+    thanks_words = ["спасибо", "спс", "благодарю", "thanks", "пасиб", "от души", "мпасибо", "спасиб", "спасибр", "сиба", "сэнкью"]
+    
+    if text.lower().strip(" .!") in thanks_words:
+        current_state = state_manager.get_state(user_id)
+        if current_state == "recipe_sent":
+            await message.answer("На здоровье! 👨‍🍳 Заходите ещё!")
+            state_manager.clear_state(user_id)
+            return
+
     last_bot_msg = state_manager.get_last_bot_message(user_id)
     
     if not last_bot_msg:
@@ -157,7 +177,9 @@ async def handle_user_choice(message: Message, user_id: int = None, text: str = 
         elif intent.get("intent") == "add_products":
             await handle_add_products(message, user_id, intent.get("products"))
         else:
-            await message.answer("Не понял. Нажми на блюдо или добавь продукты.")
+            # Если не понял, возможно это просто болтовня или мусор
+            # Можно проверить на валидацию, но здесь лучше просто переспросить
+            await message.answer("Не понял. Нажми на блюдо из списка или добавь продукты (например: 'добавь сыр').")
     except Exception as e:
         await wait_msg.delete()
         await message.answer(f"Ошибка: {e}")
@@ -169,16 +191,25 @@ async def handle_dish_selection(message: Message, user_id: int, dish_name: str):
         recipe = await groq_service.generate_recipe(dish_name, products)
         
         await wait_msg.delete()
-        
-        # Просто текст
-        await message.answer(recipe, reply_markup=get_restart_keyboard())
+        await message.answer(recipe, reply_markup=get_restart_keyboard(), parse_mode="HTML")
         
         state_manager.clear_history(user_id)
+        state_manager.set_state(user_id, "recipe_sent")
+        
     except Exception as e:
         await wait_msg.delete()
         await message.answer(f"Ошибка рецепта: {e}")
 
 async def handle_add_products(message: Message, user_id: int, new_products: str):
+    # --- ВАЛИДАЦИЯ ДОБАВЛЕНИЯ ---
+    # Проверяем, что добавляет пользователь. Если "мпасибо" проскочило через intent (вдруг),
+    # валидатор его поймает здесь.
+    is_valid = await groq_service.validate_ingredients(new_products)
+    
+    if not is_valid:
+        await message.answer(f"🤨 <b>\"{new_products}\"</b> — не похоже на продукты. Попробуйте еще раз.")
+        return
+
     state_manager.update_products(user_id, new_products)
     all_products = state_manager.get_products(user_id)
     wait_msg = await message.answer(f"➕ Добавил: {new_products}. Обновляю меню...")
@@ -194,7 +225,9 @@ async def handle_add_products(message: Message, user_id: int, new_products: str)
         await message.answer(f"Ошибка: {e}")
 
 async def handle_restart(callback: CallbackQuery):
-    state_manager.clear_history(callback.from_user.id)
+    user_id = callback.from_user.id
+    state_manager.clear_history(user_id)
+    state_manager.clear_state(user_id)
     await callback.message.answer("Сброс! Жду список продуктов.")
     await callback.answer()
 
