@@ -115,4 +115,4 @@ async def handle_initial_products(message: Message, user_id: int, products: str)
     state_manager.clear_state(user_id)
     
     await message.answer(
-        f"✅ Принято: <
+        f"✅ Принято: <"
