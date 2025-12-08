@@ -2,9 +2,10 @@ import asyncio
 import os
 import logging
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand # Импорт для команд
 from config import TELEGRAM_TOKEN
 from handlers import register_handlers
-from aiohttp import web  # Для веб-сервера Render
+from aiohttp import web
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -24,17 +25,25 @@ async def start_web_server():
     app.router.add_get('/', health_check)
     runner = web.AppRunner(app)
     await runner.setup()
-    
-    # Render передает порт через переменную окружения PORT
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     logger.info(f"🌍 Web server started on port {port}")
-# ---------------------------------------------
+
+# --- НАСТРОЙКА МЕНЮ ---
+async def setup_bot_commands(bot: Bot):
+    commands = [
+        BotCommand(command="/start", description="🔄 Рестарт / Новые продукты"),
+        BotCommand(command="/author", description="👨‍💻 Автор бота")
+    ]
+    await bot.set_my_commands(commands)
 
 async def main():
     # Регистрация хэндлеров
     register_handlers(dp)
+    
+    # Установка команд в меню
+    await setup_bot_commands(bot)
     
     logger.info("🤖 Бот запускается...")
     
