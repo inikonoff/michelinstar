@@ -4,13 +4,11 @@ from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from utils import VoiceProcessor
 from groq_service import GroqService
-from image_service import ImageService
 from state_manager import state_manager
 
-# Инициализация сервисов
+# Инициализация сервисов (ImageService убрали)
 voice_processor = VoiceProcessor()
 groq_service = GroqService()
-image_service = ImageService()
 
 # --- ВСПОМОГАТЕЛЬНЫЕ КЛАВИАТУРЫ ---
 
@@ -26,7 +24,7 @@ def get_style_keyboard() -> InlineKeyboardMarkup:
 def get_restart_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура с кнопкой рестарта"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Сброс", callback_data="restart")]
+        [InlineKeyboardButton(text="🔄 Заново", callback_data="restart")]
     ])
 
 def get_hide_keyboard() -> InlineKeyboardMarkup:
@@ -42,14 +40,15 @@ async def cmd_start(message: Message):
     state_manager.clear_history(user_id)
     await message.answer(
         "👋 Здравствуйте.\n\n"
-        "🎤 Отправьте голосовое или текстовое сообщение с перечнем продуктов, и я подскажу, что из них можно приготовить.\n"
+        "🎤 <b>Отправьте</b> голосовое или текстовое сообщение с перечнем продуктов, и я подскажу, что из них можно приготовить.\n"
         '📝 Или напишите <b>"Дай рецепт [блюдо]"</b>.',
         parse_mode="HTML"
     )
 
 async def cmd_author(message: Message):
     await message.answer(
-        "👨‍💻 <b>Разработчик бота:</b> @inikonoff",
+        "👨‍💻 <b>Разработчик бота:</b> @inikonoff\n\n"
+        "Пишите по вопросам и предложениям!",
         parse_mode="HTML"
     )
 
@@ -62,18 +61,10 @@ async def handle_easter_egg_recipe(message: Message):
     wait_msg = await message.answer(f"⚡️ Ищу рецепт: {dish_name}...")
     try:
         recipe = await groq_service.generate_freestyle_recipe(dish_name)
-        image_url = await image_service.search_dish_image(dish_name)
         await wait_msg.delete()
         
-        kb = get_hide_keyboard()
-
-        # ИСПРАВЛЕНИЕ: Отправляем фото и текст раздельно
-        if image_url:
-            # Сначала фото
-            await message.answer_photo(image_url)
-        
-        # Потом текст (лимит 4096 символов, этого точно хватит)
-        await message.answer(recipe, reply_markup=kb)
+        # Просто отправляем текст рецепта
+        await message.answer(recipe, reply_markup=get_hide_keyboard())
 
     except Exception as e:
         await wait_msg.delete()
@@ -176,19 +167,11 @@ async def handle_dish_selection(message: Message, user_id: int, dish_name: str):
     try:
         products = state_manager.get_products(user_id)
         recipe = await groq_service.generate_recipe(dish_name, products)
-        image_url = await image_service.search_dish_image(dish_name)
         
         await wait_msg.delete()
         
-        kb = get_restart_keyboard()
-        
-        # ИСПРАВЛЕНИЕ: Отправляем фото и текст раздельно
-        if image_url:
-            # Сначала фото
-            await message.answer_photo(image_url)
-        
-        # Потом текст (лимит 4096 символов, этого точно хватит)
-        await message.answer(recipe, reply_markup=kb)
+        # Просто текст
+        await message.answer(recipe, reply_markup=get_restart_keyboard())
         
         state_manager.clear_history(user_id)
     except Exception as e:
