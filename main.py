@@ -44,7 +44,7 @@ async def start_web_server():
 # --- НАСТРОЙКА МЕНЮ ---
 async def setup_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="/start", description="🔄 Рестарт / Новые продукты"),
+        BotCommand(command="/start", description="🔄 Рестарт / новые продукты"),
         BotCommand(command="/author", description="👨‍💻 Автор бота")
     ]
     try:
