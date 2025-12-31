@@ -39,10 +39,14 @@ class GroqService:
 
     @staticmethod
     async def analyze_categories(products: str) -> List[str]:
-        """Определяет категории блюд на основе продуктов."""
+        """Определяет категории блюд. Добавлена логика базовых продуктов и супов."""
         prompt = (
-            "Analyze ingredients and return ONLY a JSON array of keys: "
-            "['soup', 'main', 'salad', 'breakfast', 'dessert', 'drink', 'snack']."
+            "Analyze ingredients and return ONLY a JSON array of keys from this list: "
+            "['soup', 'main', 'salad', 'breakfast', 'dessert', 'drink', 'snack'].\n\n"
+            "STRICT RULES:\n"
+            "1. Always assume the user has BASIC products (water, salt, oil, sugar, pepper).\n"
+            "2. If the ingredients allow for making a liquid dish (soup/broth) using water, ALWAYS include 'soup' in the keys.\n"
+            "3. If very few ingredients, return only the most suitable category."
         )
         res = await GroqService._send_groq_request(prompt, products, 0.2)
         try:
@@ -53,15 +57,18 @@ class GroqService:
 
     @staticmethod
     async def generate_dishes_list(products: str, category: str, style: str = "обычный", lang_code: str = "ru") -> List[Dict[str, str]]:
+        """Генерирует список блюд с нативными названиями для кнопок."""
         is_ru = lang_code[:2].lower() == "ru"
         target_lang = "Russian" if is_ru else "the user's interface language"
 
         system_prompt = (
-            f"You are a creative chef. Suggest 4-6 dishes. "
+            f"You are a creative chef. Suggest 4-6 dishes in category '{category}'.\n"
             f"STRICT LANGUAGE RULES:\n"
-            f"1. Field 'name': Use the NATIVE language of the input ingredients (e.g., 'Tortilla de Patatas').\n"
+            f"1. Field 'name': Use the NATIVE language of the dish (e.g., 'Insalata Estiva' or 'Pollo alla Cacciatora'). This is for buttons.\n"
             f"2. Field 'desc': Write the description strictly in {target_lang}.\n"
-            f"3. Field 'display_name': If the user language is Russian and input is foreign, format as: 'Original Name (Russian Translation)'.\n"
+            f"3. Field 'display_name': If the user language is Russian and input is foreign, format as: 'Original Name (Russian Translation)'.\n
+            f"4. Always assume basics (water, salt, oil, sugar, pepper) are available."
+            f"5. If the ingredients allow for making a liquid dish (soup/broth) using water, ALWAYS include 'soup' in the list.\n"
             f"Return ONLY JSON list: [{{'name': '...', 'display_name': '...', 'desc': '...'}}]."
         )
         res = await GroqService._send_groq_request(system_prompt, f"Ingredients: {products}, Category: {category}, Style: {style}", 0.6)
@@ -73,33 +80,29 @@ class GroqService:
 
     @staticmethod
     async def generate_recipe(dish_name: str, products: str, lang_code: str = "ru") -> str:
-        """Генерация экспертного рецепта с адаптивными единицами измерения и обновленным блоком пищевой ценности."""
+        """Генерация экспертного рецепта. Название блюда остается СТРОГО нативном языке."""
         languages = {"ru": "Russian", "en": "English", "es": "Spanish", "fr": "French", "de": "German"}
         target_lang = languages.get(lang_code[:2].lower(), "Russian")
 
         system_prompt = (
             f"You are a professional chef. Write a detailed recipe strictly in {target_lang}.\n\n"
             f"STRICT RULES:\n"
-            f"1. NAME: Always use the ORIGINAL native name of the dish (e.g., 'Pasta Carbonara', 'Tortilla de Patatas') regardless of localization.\n"
+            f"1. NAME: Always use the ORIGINAL NATIVE name of the dish (e.g., 'Insalata Estiva', 'Pollo alla Cacciatora') in the header. NEVER translate the header name into {target_lang}.\n"
             f"2. SILENT EXCLUSION: Do not mention ingredients that are NOT used.\n"
-            f"3. INGREDIENT UNITS: Use realistic kitchen measurements. Most items in grams, BUT:\n"
-            f"   - Oils/liquids: tablespoons (ст. л.) or teaspoons (ч. л.).\n"
+            f"3. INGREDIENT UNITS: Use realistic measurements:\n"
+            f"   - Liquids/Oils: tablespoons (ст. л.) or teaspoons (ч. л.).\n"
             f"   - Garlic: cloves (зубчика).\n"
-            f"   - Vegetables (carrots, beets, onions, etc.): pieces (шт.).\n"
-            f"   - Format each line exactly as: '- ingredient - amount'.\n"
-            f"4. NUTRITION: You MUST calculate numerical values per serving. Use the EXACT following format with emojis (no KBHU abbreviation):\n"
+            f"   - Vegetables (carrots, onions, etc.): pieces (шт.).\n"
+            f"   - Others: grams (г).\n"
+            f"   - Format each line: '- ingredient - amount'.\n"
+            f"4. NUTRITION: Calculate numerical values per serving. Format EXACTLY:\n"
             f"   📊 Пищевая ценность на 1 порцию:\n"
             f"   🥚 Белки: X г\n"
             f"   🥑 Жиры: X г\n"
             f"   🌾 Углеводы: X г\n"
             f"   ⚡ Энерг. ценность: X ккал\n"
-            f"5. TIME & INFO: Display time, difficulty and servings in separate lines with emojis:\n"
-            f"   ⏱ Время: X минут\n"
-            f"   🎚 Сложность: низкая/средняя/высокая\n"
-            f"   👥 Порции: X человек\n"
-            f"6. LOCALIZATION: Steps and labels MUST be in {target_lang}.\n"
-            f"7. NO EMOJIS inside ingredient list or cooking steps. No formatting like '**' in steps.\n"
-            f"8. CULINARY TRIAD: Add 'Chef's Advice' (Taste, Aroma, Texture). Recommend EXACTLY ONE missing item.\n\n"
+            f"5. NO EMOJIS inside ingredient list or cooking steps. No formatting like '**' in steps.\n"
+            f"6. CULINARY TRIAD: Add 'Chef's Advice' (Taste, Aroma, Texture). Recommend EXACTLY ONE missing item.\n\n"
             f"STRUCTURE IN {target_lang.upper()}:\n"
             "🥘 [Original Native Name]\n\n"
             "📦 Ингредиенты:\n[List formatted as '- item - amount']\n\n"
