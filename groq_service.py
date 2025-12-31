@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 class GroqService:
     
-    # --- БАЗОВЫЙ МЕТОД ЗАПРОСА ---
     @staticmethod
     async def _send_groq_request(system_prompt: str, user_text: str, temperature: float = 0.5, max_tokens: int = 1000) -> str:
         try:
@@ -28,157 +27,116 @@ class GroqService:
             logger.error(f"Groq API Error: {e}")
             return ""
 
-    # --- ЛОГИКА ---
-
     @staticmethod
     async def validate_ingredients(text: str) -> bool:
-        prompt = """Твоя задача — модерация списка продуктов.
-        Верни JSON: {"valid": true} ЕСЛИ в тексте съедобные продукты.
-        Верни JSON: {"valid": false} ЕСЛИ бессмыслица, приветствия или несъедобные/опасные предметы.
-        ВЕРНИ ТОЛЬКО JSON."""
-        
-        res = await GroqService._send_groq_request(prompt, f"Анализируй: \"{text}\"", 0.1)
+        """Модерация ввода: только продукты и съедобное."""
+        prompt = (
+            "You are a content moderator for a cooking app. Your task is to validate a list of ingredients. "
+            "Return ONLY a JSON object: {\"valid\": true} if the text contains edible food items or ingredients. "
+            "Return {\"valid\": false} if the text is gibberish, greetings, non-edible objects, or dangerous items. "
+            "Ignore minor typos. Logic: Is it possible to cook with this?"
+        )
+        res = await GroqService._send_groq_request(prompt, f"Input: \"{text}\"", 0.1)
         return "true" in res.lower()
 
     @staticmethod
     async def analyze_categories(products: str) -> List[str]:
-        """
-        Определяет, какие категории блюд из этого РЕАЛЬНО приготовить.
-        Возвращает список ключей: ['soup', 'main', 'salad', 'dessert', 'drink', 'snack']
-        """
-        prompt = f"""Ты опытный шеф-повар. Проанализируй список продуктов: "{products}".
-        
-        Определи, какие категории блюд из этого РЕАЛЬНО приготовить (имея базовые соль/воду/масло).
-        
-        Возможные категории:
-        - "soup" (супы)
-        - "main" (вторые блюда)
-        - "salad" (салаты)
-        - "breakfast" (завтраки)
-        - "dessert" (десерты - только если есть сахар/фрукты/мука)
-        - "drink" (напитки - смузи, морсы, коктейли - если есть фрукты/молоко/ягоды)
-        - "snack" (закуски)
-        
-        ВЕРНИ ТОЛЬКО JSON список ключей. Если продуктов очень мало, верни только самую подходящую категорию.
-        Пример: ["main", "salad", "drink"]
-        """
-        
-        res = await GroqService._send_groq_request(prompt, "Анализируй категории", 0.2)
-        
+        """Определяет подходящие категории блюд на основе триггеров из en.py"""
+        prompt = (
+            "You are an experienced chef. Analyze the ingredients and determine which dish categories can be cooked. "
+            "Rules: 2+ vegetables/meat -> 'soup'. Fresh veg -> 'salad'. Eggs/flour/milk -> 'breakfast'. "
+            "Sugar/fruit -> 'dessert'. Fruit/berries -> 'drink'. "
+            "Available categories: ['soup', 'main', 'salad', 'breakfast', 'dessert', 'drink', 'snack']. "
+            "Return ONLY a JSON array of keys. If very few ingredients, pick the most relevant one."
+        )
+        res = await GroqService._send_groq_request(prompt, f"Ingredients: {products}", 0.2)
         try:
-            # Очистка от маркдауна, который любит Groq
             clean_json = res.replace("```json", "").replace("```", "").strip()
             data = json.loads(clean_json)
-            if isinstance(data, list):
-                return data
-        except Exception as e:
-            logger.error(f"Category JSON Error: {e}")
-            pass
-        
-        # Fallback, если что-то пошло не так
-        return ["main"]
+            return data if isinstance(data, list) else ["main"]
+        except:
+            return ["main"]
 
     @staticmethod
     async def generate_dishes_list(products: str, category: str, style: str = "обычный") -> List[Dict[str, str]]:
-        """
-        Генерирует список блюд. Количество зависит от обилия продуктов.
-        """
-        # Умный подсчет ингредиентов
-        items_count = len(re.split(r'[,]', products))
-        
-        if items_count <= 2:
-            target_count = "2-3"
-            complexity = "простых"
-        elif items_count <= 5:
-            target_count = "4-5"
-            complexity = "разнообразных"
-        else:
-            target_count = "5-6" # Максимум 6 для экрана телефона
-            complexity = "интересных"
-
-        # Карта названий
-        cat_names = {
-            "soup": "Супы", "main": "Вторые блюда", "salad": "Салаты",
-            "breakfast": "Завтраки", "dessert": "Десерты", "drink": "Напитки", "snack": "Закуски"
-        }
-        cat_ru = cat_names.get(category, "Блюда")
-
-        prompt = f"""Ты шеф-повар. Продукты: {products}.
-        Задача: Придумай {target_count} {complexity} блюд в категории: "{cat_ru}". Стиль: {style}.
-        
-        Если категория "Напитки" - предлагай смузи, морсы, коктейли.
-        
-        ВЕРНИ СТРОГО JSON формат (список объектов), без лишних слов:
-        [
-            {{"name": "Название блюда", "desc": "Краткое описание"}}
-        ]
-        """
-        
-        res = await GroqService._send_groq_request(prompt, "Предложи меню JSON", 0.5)
-        
+        """Генерирует список названий блюд с учетом стиля."""
+        prompt = (
+            f"You are a creative chef. Suggest 4-6 dishes in the category '{category}' using the provided ingredients. "
+            f"Style: {style}. Focus on making them appetizing. "
+            "Return ONLY a JSON list of objects: [{\"name\": \"Dish Name\", \"desc\": \"Short tasty description\"}]. "
+            "No conversational text."
+        )
+        res = await GroqService._send_groq_request(prompt, f"Ingredients: {products}", 0.5)
         try:
             clean_json = res.replace("```json", "").replace("```", "").strip()
-            data = json.loads(clean_json)
-            if isinstance(data, list):
-                return data
-        except Exception as e:
-            logger.error(f"Dishes JSON Error: {e}")
-        return []
+            return json.loads(clean_json)
+        except:
+            return []
 
-    @staticmethod
-    async def determine_intent(user_message: str, dish_list: str) -> Dict:
-        prompt = f"""Контекст: {dish_list}
-        Сообщение: "{user_message}"
-        Определи намерение:
-        1. "add_products" (добавил продукты, изменил условия)
-        2. "select_dish" (назвал блюдо текстом)
-        3. "unclear"
-        JSON: {{"intent": "...", "products": "...", "dish_name": "..."}}"""
-
-        res = await GroqService._send_groq_request(prompt, "Анализируй", 0.1)
-        
-        try:
-            start = res.find('{')
-            end = res.rfind('}')
-            if start != -1 and end != -1:
-                return json.loads(res[start : end + 1])
-        except Exception:
-            pass
-        return {"intent": "unclear"}
-            
     @staticmethod
     async def generate_recipe(dish_name: str, products: str) -> str:
-        prompt = f"""Напиши подробный рецепт: "{dish_name}".
-        Доступные продукты: {products}.
-        
-        Формат:
-        🍽️ [Название]
-        🛒 Ингредиенты: (Пометь ✅ есть, 🛒 докупить)
-        👨‍🍳 Приготовление: (по шагам)"""
+        """Основной метод генерации экспертного рецепта."""
+        system_prompt = (
+            "You are a professional culinary instructor and nutritionist. Write a detailed recipe in RUSSIAN. "
+            "\n\nSTRICT RULES:\n"
+            "1. INGREDIENTS: Use ONLY the products provided by the user. "
+            "Exception: You may assume BASIC items (water, salt, pepper, sugar, vegetable oil, flour, vinegar) are always available. "
+            "2. SUBSTITUTIONS: If a key ingredient is missing but a logical substitute exists in the user's list (e.g., yogurt instead of sour cream), "
+            "use the substitute in the recipe steps but name it as the substitute. "
+            "3. NO EMOJIS: Do not use checkmarks or any icons in the ingredients list or steps. "
+            "4. NO FORMATTING: Do not use '*' or '**' inside the preparation steps. "
+            "5. KBHU: Provide estimated Calories, Proteins, Fats, and Carbohydrates PER SERVING. "
+            "6. CHEF'S TRIAD: At the end, add a section 'Совет шеф-повара'. Analyze the dish using the 'Culinary Triad' (Taste, Aroma, Texture). "
+            "Explain the chemistry of flavor. You may recommend EXACTLY ONE missing ingredient to complete the triad. "
+            "\n\nOUTPUT STRUCTURE (RUSSIAN):\n"
+            "Название блюда\n\n"
+            "Ингредиенты (с граммовкой):\n[List]\n\n"
+            "КБЖУ на порцию:\n[Data]\n\n"
+            "Параметры:\nВремя: [min], Сложность: [level], Порции: [num]\n\n"
+            "Приготовление:\n[Steps]\n\n"
+            "Совет шеф-повара:\n[Triad Analysis]"
+        )
 
-        res = await GroqService._send_groq_request(prompt, "Напиши рецепт", 0.4)
-        if GroqService._is_refusal(res): return res
+        user_input = f"Dish: {dish_name}. Available ingredients: {products}"
+        res = await GroqService._send_groq_request(system_prompt, user_input, 0.3, 1500)
+        
+        if GroqService._is_refusal(res): 
+            return res
         return res + "\n\n👨‍🍳 <b>Приятного аппетита!</b>"
 
     @staticmethod
     async def generate_freestyle_recipe(dish_name: str) -> str:
-        prompt = f"""Пользователь просит рецепт: "{dish_name}".
-        
-        ПРАВИЛА БЕЗОПАСНОСТИ:
-        1. Если это ЕДА -> Пиши вкусный рецепт.
-        2. Если это АБСТРАКЦИЯ (счастье, любовь) -> Пиши метафорический рецепт.
-        3. Если это ОПАСНОЕ/ЗАПРЕЩЕННОЕ (наркотики, оружие, яды, насилие) -> 
-           Ответь СТРОГО: "⛔ Извините, я готовлю только еду."
-        """
-
-        res = await GroqService._send_groq_request(prompt, "Напиши рецепт", 0.6)
+        """Метафорические или свободные рецепты с фильтром безопасности"""
+        prompt = (
+            "You are a creative chef. If the request is FOOD, write a recipe. "
+            "If it is an ABSTRACTION (love, happiness), write a metaphorical recipe. "
+            "If it is DANGEROUS/PROHIBITED, return ONLY: '⛔ Извините, я готовлю только еду.' "
+            "Write in RUSSIAN."
+        )
+        res = await GroqService._send_groq_request(prompt, f"Request: {dish_name}", 0.6)
         if GroqService._is_refusal(res): return res
         return res + "\n\n👨‍🍳 <b>Приятного аппетита!</b>"
 
     @staticmethod
+    async def determine_intent(user_message: str, dish_list: str) -> Dict:
+        """Определение намерения пользователя через JSON"""
+        prompt = (
+            "Analyze the user message and context. Determine intent: "
+            "1. 'add_products' (changing list), 2. 'select_dish' (naming a dish), 3. 'unclear'. "
+            "Return JSON: {\"intent\": \"...\", \"products\": \"...\", \"dish_name\": \"...\"}"
+        )
+        res = await GroqService._send_groq_request(prompt, f"Context: {dish_list}\nMessage: {user_message}", 0.1)
+        try:
+            start, end = res.find('{'), res.rfind('}')
+            if start != -1 and end != -1:
+                return json.loads(res[start : end + 1])
+        except:
+            pass
+        return {"intent": "unclear"}
+
+    @staticmethod
     def _is_refusal(text: str) -> bool:
+        """Проверка на отказ модели"""
         if "⛔" in text: return True
-        refusals = ["cannot fulfill", "cannot answer", "against my policy", "не могу ответить", "нарушает правила"]
-        for ph in refusals:
-            if ph in text.lower(): return True
-        return False
+        refusals = ["cannot fulfill", "against my policy", "не могу ответить", "нарушает правила"]
+        return any(ph in text.lower() for ph in refusals)
