@@ -83,6 +83,8 @@ class GroqService:
         2. Field 'desc': Write the description strictly in {target_lang}.
         3. Field 'display_name': If input is not in {target_lang}, format as: 'Original Name ({target_lang} Translation)'.
         4. Always assume basics (water, salt, oil, sugar, pepper, ice) are available.
+        4.1 Don't use all the ingredients for a single dish if they are not necessary. 
+        4.2 List only used ingredients.
         5. If the ingredients allow for making a liquid dish (soup/broth) using water, carrots and onion ALWAYS include 'soup' in the list.
         Return ONLY JSON: [{{"name": "...", "display_name": "...", "desc": "..."}}]."""
         
