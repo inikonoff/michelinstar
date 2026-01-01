@@ -105,12 +105,12 @@ class GroqService:
            - Detect the language of each input ingredient.
            - If it's NOT in {target_lang}, format as: '- Original (Translation) - amount'.
            - Example: '- Pollo (Курица) - 1 кг'.
-        3. NUTRITION: Calculate per serving with emojis: 📊, 🥚, 🥑, 🌾, ⚡. Format EXACTLY:\n"
-            f"   📊 Пищевая ценность на 1 порцию:\n"
-            f"   🥚 Белки: X г\n"
-            f"   🥑 Жиры: X г\n"
-            f"   🌾 Углеводы: X г\n"
-            f"   ⚡ Энерг. ценность: X ккал\n"
+        3. NUTRITION: Calculate per serving with emojis: 📊, 🥚, 🥑, 🌾, ⚡. Format EXACTLY:
+           📊 Пищевая ценность на 1 порцию:
+           🥚 Белки: X г
+           🥑 Жиры: X г
+           🌾 Углеводы: X г
+           ⚡ Энерг. ценность: X ккал
         4. CULINARY TRIAD: End with '💡 Совет шеф-повара (Кулинарная триада)'. 
            Analyze Taste, Aroma, and Texture. Recommend one missing item for balance.
         5. NO BOLD text in steps.
@@ -121,10 +121,9 @@ class GroqService:
         📦 ИНГРЕДИЕНТЫ:
         [Bilingual list]
         
-        📊 Пищевая ценность...
-        ⏱ Время
-       🎚 Сложность
-        👥 Порции
+        ⏱ Время: XX минут
+        🎚 Сложность: [легкая/средняя/сложная]
+        👥 Порции: X чел.
         
         🔪 Приготовление:
         [Steps]
@@ -138,3 +137,11 @@ class GroqService:
         bon = farewells.get(lang_code[:2].lower(), "Приятного аппетита!")
         
         return f"{res}\n\n👨‍🍳 <b>{bon}</b>"
+
+    @staticmethod
+    def get_welcome_message() -> str:
+        """Возвращает приветственное сообщение."""
+        return """👋 Здравствуйте.
+
+🎤 Отправьте голосовое или текстовое сообщение с перечнем продуктов, и я подскажу, что из них можно приготовить.
+📝 Или напишите "Дай рецепт [блюдо"."""
