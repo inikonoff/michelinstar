@@ -4,11 +4,13 @@ import logging
 import sys
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
+from aiogram.fsm.storage.memory import MemoryStorage # Важно для хранения продуктов
+from aiohttp import web  # Для Health Check на Render
+
 from config import TELEGRAM_TOKEN
 from handlers import register_handlers
-from aiohttp import web  # Для веб-сервера Render
 
-# Настройка логирования (STDOUT важен для Render!)
+# --- НАСТРОЙКА ЛОГИРОВАНИЯ ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -16,16 +18,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Инициализация
+# --- ИНИЦИАЛИЗАЦИЯ ---
+# MemoryStorage хранит данные в ОЗУ. Идеально для Render.
+storage = MemoryStorage()
 bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=storage)
 
-# --- Веб-сервер для Render (Health Check) ---
+# --- ВЕБ-СЕРВЕР ДЛЯ RENDER (HEALTH CHECK) ---
 async def health_check(request):
-    return web.Response(text="Bot is running OK")
+    """Render будет пинговать этот адрес, чтобы знать, что бот жив"""
+    return web.Response(text="Bot is running OK", status=200)
 
 async def start_web_server():
-    """Запускает заглушку веб-сервера"""
+    """Запускает фоновый веб-сервер на порту, который выдает Render"""
     try:
         app = web.Application()
         app.router.add_get('/', health_check)
@@ -33,7 +38,7 @@ async def start_web_server():
         runner = web.AppRunner(app)
         await runner.setup()
         
-        # Render передает порт через переменную окружения PORT
+        # Порт берется из переменной окружения Render, по умолчанию 8080
         port = int(os.environ.get("PORT", 8080))
         site = web.TCPSite(runner, '0.0.0.0', port)
         await site.start()
@@ -41,39 +46,45 @@ async def start_web_server():
     except Exception as e:
         logger.error(f"❌ Error starting web server: {e}")
 
-# --- НАСТРОЙКА МЕНЮ ---
+# --- НАСТРОЙКА МЕНЮ КОМАНД ---
 async def setup_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="/start", description="🔄 Рестарт / новые продукты"),
-        BotCommand(command="/author", description="👨‍💻 Автор бота")
+        BotCommand(command="/start", description="🔄 Новые продукты / Рестарт"),
+        BotCommand(command="/author", description="👨‍💻 Об авторе")
     ]
     try:
         await bot.set_my_commands(commands)
+        logger.info("✅ Команды меню установлены")
     except Exception as e:
-        logger.error(f"Не удалось установить команды: {e}")
+        logger.error(f"❌ Не удалось установить команды: {e}")
 
-# --- ГЛАВНАЯ ФУНКЦИЯ ---
+# --- ГЛАВНАЯ ФУНКЦИЯ ЗАПУСКА ---
 async def main():
-    logger.info("🤖 Инициализация...")
+    logger.info("🤖 Starting bot initialization...")
 
-    # 1. САМОЕ ВАЖНОЕ: Сначала запускаем веб-сервер!
-    # Это нужно сделать ДО любых запросов к Telegram, чтобы Render сразу увидел открытый порт.
+    # 1. Запуск Health Check сервера (критично для Render)
+    # Делаем это первым, чтобы Render зафиксировал открытый порт
     await start_web_server()
 
-    # 2. Регистрируем обработчики
+    # 2. Регистрация всех хэндлеров (импорт из вашего файла handlers.py)
     register_handlers(dp)
     
-    # 3. Настраиваем команды (может занять время, поэтому делаем после сервера)
+    # 3. Установка команд меню в интерфейсе Telegram
     await setup_bot_commands(bot)
     
-    logger.info("🚀 Запуск polling...")
+    logger.info("🚀 Starting polling...")
     
-    # 4. Удаляем вебхук и запускаем
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    # 4. Сброс накопившихся обновлений и запуск бесконечного цикла (polling)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    except Exception as e:
+        logger.error(f"❌ Polling error: {e}")
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         logger.info("Бот остановлен")
