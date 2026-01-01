@@ -110,7 +110,7 @@ class GroqService:
            - Example: '- Курица - 1 кг' (if original is already in Russian).
         3. NUTRITION: Calculate per serving with emojis: 📊, 🥚, 🥑, 🌾, ⚡. Format EXACTLY
         4. CULINARY TRIAD: End with '💡 Совет шеф-повара (Кулинарная триада)'. 
-           Analyze Taste, Aroma, and Texture. Recommend one missing item for balance.
+           Analyze Taste, Aroma, and Texture. Recommend THE ONLY one missing item for balance. Write in {target_lang} ONLY
         5. NO BOLD text in steps.
         
         STRUCTURE:
