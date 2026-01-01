@@ -58,11 +58,13 @@ class GroqService:
 
         system_prompt = (
             f"You are a creative chef. Suggest 4-6 dishes. "
+            f"Suggest 4-6 dishes in category '{category}' using provided ingredients. Style: {style}. "
             f"STRICT LANGUAGE RULES:\n"
             f"1. Field 'name': Use the NATIVE language of the input ingredients (e.g., 'Tortilla de Patatas').\n"
             f"2. Field 'desc': Write the description strictly in {target_lang}.\n"
-            f"3. Field 'display_name': If the user language is Russian and input is foreign, format as: 'Original Name (Russian Translation)'.\n"
-            f"Return ONLY JSON list: [{{'name': '...', 'display_name': '...', 'desc': '...'}}]."
+            f"3. Field 'display_name': If the user language is {target_lang} and input is foreign, format as: 'Original Name ({target_lang} Translation)'.\n"
+            f"4. Field 'display_name': If the user language is {target_lang} and input is {target_lang}, format as: 'Original Name'.\n"
+            "Return ONLY JSON: [{\"name\": \"Dish Name\", \"desc\": \"Short tasty description\"}]."
         )
         res = await GroqService._send_groq_request(system_prompt, f"Ingredients: {products}, Category: {category}, Style: {style}", 0.6)
         try:
@@ -81,27 +83,31 @@ class GroqService:
             f"You are a professional chef. Write a detailed recipe strictly in {target_lang}.\n\n"
             f"STRICT RULES:\n"
             f"1. NAME: Always use the ORIGINAL native name of the dish (e.g., 'Pasta Carbonara', 'Tortilla de Patatas') regardless of localization.\n"
-            f"2. SILENT EXCLUSION: Do not mention ingredients that are NOT used.\n"
-            f"3. INGREDIENT UNITS: Use realistic kitchen measurements. Most items in grams, BUT:\n"
+            f"2. SMART SUBSTITUTES: If a key ingredient is missing, use a logical substitute from the user's list (e.g., yogurt for sour cream).\n"
+            f"3. SILENT EXCLUSION: USE ONLY user products + BASIC items (water, salt, pepper, sugar, oil, flour, vinegar). If you don't use some of the provided ingredients, DO NOT mention them. Do not write 'I didn't use...' or 'Excluding...'. Just provide the recipe.\n"
+            f"3.1 If the ingredients allow for making a broth using water, onions and carrots ALWAYS include 'soup' in the list of categories.\n"
+            f"3.2 Possible keys: ['soup', 'main', 'salad', 'breakfast', 'dessert', 'drink', 'snack'].\n"
+            f"3.3 Return ONLY a JSON array of applicable keys. If very few ingredients, return only the most suitable one."
+            f"4. INGREDIENT UNITS: Use realistic kitchen measurements. Most items in grams, BUT:\n"
             f"   - Oils/liquids: tablespoons (ст. л.) or teaspoons (ч. л.).\n"
             f"   - Garlic: cloves (зубчика).\n"
             f"   - Vegetables (carrots, beets, onions, etc.): pieces (шт.).\n"
             f"   - Format each line exactly as: '- ingredient - amount'.\n"
-            f"4. NUTRITION: You MUST calculate numerical values per serving. Use the EXACT following format with emojis (no KBHU abbreviation):\n"
+            f"5. NUTRITION: You MUST calculate numerical values per serving. Use the EXACT following format with emojis (no KBHU abbreviation):\n"
             f"   📊 Пищевая ценность на 1 порцию:\n"
             f"   🥚 Белки: X г\n"
             f"   🥑 Жиры: X г\n"
             f"   🌾 Углеводы: X г\n"
             f"   ⚡ Энерг. ценность: X ккал\n"
-            f"5. TIME & INFO: Display time, difficulty and servings in separate lines with emojis:\n"
+            f"6. TIME & INFO: Display time, difficulty and servings in separate lines with emojis:\n"
             f"   ⏱ Время: X минут\n"
             f"   🎚 Сложность: низкая/средняя/высокая\n"
             f"   👥 Порции: X человек\n"
-            f"6. LOCALIZATION: Steps and labels MUST be in {target_lang}.\n"
-            f"7. NO EMOJIS inside ingredient list or cooking steps. No formatting like '**' in steps.\n"
-            f"8. CULINARY TRIAD: Add 'Chef's Advice' (Taste, Aroma, Texture). Recommend EXACTLY ONE missing item.\n\n"
+            f"7. LOCALIZATION: Steps and labels MUST be in {target_lang}.\n"
+            f"8. NO EMOJIS inside ingredient list or cooking steps. No formatting like '**' in steps.\n"
+            f"9. CULINARY TRIAD: Add 'Chef's Advice' (Taste, Aroma, Texture). Recommend EXACTLY ONE missing item.\n\n"
             f"STRUCTURE IN {target_lang.upper()}:\n"
-            "🥘 [Original Native Name]\n\n"
+            "🥘 [Original Native Dish Name]\n\n"
             "📦 Ингредиенты:\n[List formatted as '- item - amount']\n\n"
             "📊 Пищевая ценность на 1 порцию:\n"
             "🥚 Белки: X г\n"
@@ -116,7 +122,12 @@ class GroqService:
         )
 
         res = await GroqService._send_groq_request(system_prompt, f"Dish: {dish_name}. Ingredients: {products}", 0.3)
-        
+        try:
+            # Ищем JSON массив в ответе
+            clean_json = re.search(r'\[.*\]', res, re.DOTALL).group()
+            return json.loads(clean_json)
+        except:
+            return ["main"]
         farewell = {"ru": "Приятного аппетита!", "en": "Bon appétit!", "es": "¡Buen provecho!"}
         bon = farewell.get(lang_code[:2].lower(), "Приятного аппетита!")
 
