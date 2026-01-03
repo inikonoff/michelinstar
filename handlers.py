@@ -23,15 +23,16 @@ CATEGORY_MAP = {
     "dessert": "🍰 Десерты",
     "drink": "🥤 Напитки",
     "sauce": "🍾 Соусы",
-    "mix": "🍽️ комплексный обед"
+    "mix": "🍱 Комплексный обед",
 }
 
 # --- КЛАВИАТУРЫ ---
 
-def get_style_keyboard():
+def get_confirmation_keyboard():
+    """Кнопки после ввода продуктов"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏠 Классический / Домашний", callback_data="style_ordinary")],
-        [InlineKeyboardButton(text="🌶 Экзотический / Необычный", callback_data="style_exotic")]
+        [InlineKeyboardButton(text="➕ Добавить продукты", callback_data="action_add_more")],
+        [InlineKeyboardButton(text="👨‍🍳 Готовить (Категории)", callback_data="action_cook")]
     ])
 
 def get_categories_keyboard(categories: list):
@@ -50,6 +51,7 @@ def get_categories_keyboard(categories: list):
 def get_dishes_keyboard(dishes_list: list):
     builder = []
     for i, dish in enumerate(dishes_list):
+        # Обрезаем название, чтобы влезло в кнопку
         btn_text = f"{dish['name'][:40]}"
         builder.append([InlineKeyboardButton(text=btn_text, callback_data=f"dish_{i}")])
     builder.append([InlineKeyboardButton(text="⬅️ Назад к категориям", callback_data="back_to_categories")])
@@ -70,14 +72,15 @@ async def cmd_start(message: Message):
     state_manager.clear_session(message.from_user.id)
     text = (
         "👋 Здравствуйте.\n\n"
-        "🎤 <b>Отправьте</b> голосовое или текстовое сообщение с перечнем продуктов и напитков, и я подскажу, что из них можно приготовить.\n"
-        '📝 Или напишите <b>"Дай рецепт [блюдо]"</b>.'
+        "🎤 <b>Отправьте</b> список продуктов (голосом или текстом).\n"
+        "Я помогу придумать, что из них приготовить."
     )
     await message.answer(text, parse_mode="HTML")
 
 async def cmd_author(message: Message):
     await message.answer("👨‍💻 Автор бота: @inikonoff")
 
+# Обработка прямого запроса "Дай рецепт ..."
 async def handle_direct_recipe(message: Message):
     user_id = message.from_user.id
     dish_name = message.text.lower().replace("дай рецепт", "", 1).strip()
@@ -110,7 +113,7 @@ async def handle_voice(message: Message):
         text = await voice_processor.process_voice(temp_file)
         await processing_msg.delete()
         
-        # Удаляем голосовое, если возможно
+        # Удаляем голосовое сообщение пользователя для чистоты чата
         try: await message.delete()
         except: pass
         
@@ -135,39 +138,41 @@ async def process_products_input(message: Message, user_id: int, text: str):
             state_manager.clear_state(user_id)
             return
 
+    # Если мы уже показали рецепт, но пользователь пишет что-то новое -> начинаем заново
     if state_manager.get_state(user_id) == "recipe_sent":
-        state_manager.clear_state(user_id)
+        state_manager.clear_session(user_id)
 
-    products_in_memory = state_manager.get_products(user_id)
+    # Логика добавления продуктов
+    current_products = state_manager.get_products(user_id)
     
-    # 1. Если продуктов еще нет -> Старт
-    if not products_in_memory:
+    if not current_products:
+        # Первый ввод
         is_valid = await groq_service.validate_ingredients(text)
         if not is_valid:
             await message.answer(f"🤨 <b>\"{text}\"</b> — не похоже на продукты.", parse_mode="HTML")
             return
         state_manager.set_products(user_id, text)
-        state_manager.add_message(user_id, "user", text)
-        await message.answer(f"✅ Продукты приняты.\nКакой стиль готовки?", reply_markup=get_style_keyboard(), parse_mode="HTML")
-        return
+        msg_text = f"✅ Принято: <b>{text}</b>"
+    else:
+        # Добавление к существующему
+        state_manager.append_products(user_id, text)
+        all_products = state_manager.get_products(user_id)
+        msg_text = f"➕ Добавлено: <b>{text}</b>\n🛒 <b>Всего:</b> {all_products}"
 
-    # 2. Если продукты есть -> Намерение
-    last_bot_msg = state_manager.get_last_bot_message(user_id) or ""
-    intent_data = await groq_service.determine_intent(text, last_bot_msg)
-    
-    # Упрощаем: почти любой текст считаем добавкой, если это не явный выбор
-    state_manager.append_products(user_id, text)
-    await message.answer(f"➕ Добавил: <b>{text}</b>.", parse_mode="HTML")
-    
-    # Запускаем флоу категорий заново
-    all_products = state_manager.get_products(user_id)
-    await start_category_flow(message, user_id, all_products, "с учетом новых продуктов")
+    # Показываем кнопки выбора действия
+    await message.answer(msg_text, reply_markup=get_confirmation_keyboard(), parse_mode="HTML")
 
 # --- ЛОГИКА КАТЕГОРИЙ И БЛЮД ---
 
-async def start_category_flow(message: Message, user_id: int, products: str, style: str):
+async def start_category_flow(message: Message, user_id: int):
+    products = state_manager.get_products(user_id)
+    if not products:
+        await message.answer("Список продуктов пуст. Начните заново /start")
+        return
+
     wait = await message.answer("👨‍🍳 Анализирую продукты...")
     
+    # Запрашиваем категории у Groq
     categories = await groq_service.analyze_categories(products)
     
     await wait.delete()
@@ -177,16 +182,18 @@ async def start_category_flow(message: Message, user_id: int, products: str, sty
 
     state_manager.set_categories(user_id, categories)
 
+    # Если категория всего одна - сразу идем в нее, иначе выбор
     if len(categories) == 1:
-        await show_dishes_for_category(message, user_id, products, categories[0], style)
+        await show_dishes_for_category(message, user_id, products, categories[0])
     else:
         await message.answer("📂 <b>Что будем готовить?</b>", reply_markup=get_categories_keyboard(categories), parse_mode="HTML")
 
-async def show_dishes_for_category(message: Message, user_id: int, products: str, category: str, style: str):
+async def show_dishes_for_category(message: Message, user_id: int, products: str, category: str):
     cat_name = CATEGORY_MAP.get(category, "Блюда")
     wait = await message.answer(f"🍳 Придумываю {cat_name}...")
     
-    dishes_list = await groq_service.generate_dishes_list(products, category, style)
+    # Генерируем список блюд (без стиля, по умолчанию "вкусный")
+    dishes_list = await groq_service.generate_dishes_list(products, category)
     
     if not dishes_list:
         await wait.delete()
@@ -222,32 +229,36 @@ async def handle_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     data = callback.data
     
+    # 1. Сброс
     if data == "restart":
         state_manager.clear_session(user_id)
-        await callback.message.answer("🗑 Жду продукты.")
+        await callback.message.answer("🗑 Список очищен. Жду продукты.")
         await callback.answer()
         return
 
-    if data.startswith("style_"):
-        style = "домашний" if "ordinary" in data else "экзотический"
-        products = state_manager.get_products(user_id)
-        if not products:
-            await callback.message.answer("Список пуст. /start")
-            return
-        
-        await callback.message.delete()
-        await start_category_flow(callback.message, user_id, products, style)
+    # 2. Действия с продуктами (Добавить / Готовить)
+    if data == "action_add_more":
+        await callback.message.answer("✏️ Напишите или продиктуйте, что добавить:")
+        await callback.answer()
+        # Мы просто ждем следующее текстовое сообщение, оно само обработается в handle_text
+        return
+    
+    if data == "action_cook":
+        await callback.message.delete() # Удаляем меню выбора
+        await start_category_flow(callback.message, user_id)
         await callback.answer()
         return
 
+    # 3. Выбор категории
     if data.startswith("cat_"):
         category = data.split("_")[1]
         products = state_manager.get_products(user_id)
         await callback.message.delete()
-        await show_dishes_for_category(callback.message, user_id, products, category, "выбранный")
+        await show_dishes_for_category(callback.message, user_id, products, category)
         await callback.answer()
         return
 
+    # 4. Назад к категориям
     if data == "back_to_categories":
         categories = state_manager.get_categories(user_id)
         if not categories:
@@ -256,12 +267,14 @@ async def handle_callback(callback: CallbackQuery):
         
         await callback.message.delete()
         if len(categories) == 1:
+            # Если категория была одна, то "назад" по сути рестарт или ничего
             await callback.message.answer("Категория была одна.", reply_markup=get_categories_keyboard(categories))
         else:
             await callback.message.answer("📂 <b>Выберите категорию:</b>", reply_markup=get_categories_keyboard(categories), parse_mode="HTML")
         await callback.answer()
         return
 
+    # 5. Выбор блюда
     if data.startswith("dish_"):
         try:
             index = int(data.split("_")[1])
@@ -275,6 +288,7 @@ async def handle_callback(callback: CallbackQuery):
             logger.error(f"Dish error: {e}")
         return
 
+    # 6. Повтор рецепта
     if data == "repeat_recipe":
         dish_name = state_manager.get_current_dish(user_id)
         if not dish_name:
