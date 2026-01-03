@@ -7,10 +7,14 @@ class StateManager:
         self.products: Dict[int, str] = {}
         self.user_states: Dict[int, str] = {}
         
-        # Данные текущей сессии (НОВЫЕ ПОЛЯ)
-        self.generated_dishes: Dict[int, List[dict]] = {} # Список блюд (для кнопок)
-        self.available_categories: Dict[int, List[str]] = {} # Доступные категории
-        self.current_dish: Dict[int, str] = {} # Последнее выбранное блюдо
+        # Данные текущей сессии
+        self.generated_dishes: Dict[int, List[dict]] = {}
+        self.available_categories: Dict[int, List[str]] = {}
+        self.current_dish: Dict[int, str] = {}
+        
+        # НОВОЕ: Мультиязычность
+        self.user_lang: Dict[int, str] = {}  # Язык пользователя (target_lang)
+        self.products_lang: Dict[int, str] = {}  # Язык продуктов
 
     # --- ИСТОРИЯ ---
     def get_history(self, user_id: int) -> List[dict]:
@@ -55,7 +59,7 @@ class StateManager:
         if user_id in self.user_states:
             del self.user_states[user_id]
 
-    # --- НОВОЕ: КАТЕГОРИИ И БЛЮДА ---
+    # --- КАТЕГОРИИ И БЛЮДА ---
     def set_categories(self, user_id: int, categories: List[str]):
         self.available_categories[user_id] = categories
 
@@ -77,13 +81,33 @@ class StateManager:
     def get_current_dish(self, user_id: int) -> Optional[str]:
         return self.current_dish.get(user_id)
 
-    # --- ОЧИСТКА (ВОТ ЭТОГО МЕТОДА НЕ ХВАТАЛО) ---
+    # --- МУЛЬТИЯЗЫЧНОСТЬ ---
+    def set_user_lang(self, user_id: int, lang: str):
+        """Сохраняет язык пользователя (target_lang)"""
+        self.user_lang[user_id] = lang
+
+    def get_user_lang(self, user_id: int) -> str:
+        """Возвращает язык пользователя, фолбэк на русский"""
+        return self.user_lang.get(user_id, 'ru')
+
+    def set_products_lang(self, user_id: int, lang: str):
+        """Сохраняет язык продуктов (кешируем для производительности)"""
+        self.products_lang[user_id] = lang
+
+    def get_products_lang(self, user_id: int) -> Optional[str]:
+        """Возвращает язык продуктов (может быть None если ещё не детектили)"""
+        return self.products_lang.get(user_id)
+
+    # --- ОЧИСТКА ---
     def clear_session(self, user_id: int):
+        """Полная очистка сессии пользователя"""
         if user_id in self.history: del self.history[user_id]
         if user_id in self.products: del self.products[user_id]
         if user_id in self.user_states: del self.user_states[user_id]
         if user_id in self.generated_dishes: del self.generated_dishes[user_id]
         if user_id in self.available_categories: del self.available_categories[user_id]
         if user_id in self.current_dish: del self.current_dish[user_id]
+        if user_id in self.user_lang: del self.user_lang[user_id]
+        if user_id in self.products_lang: del self.products_lang[user_id]
 
 state_manager = StateManager()
