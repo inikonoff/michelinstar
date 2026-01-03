@@ -1,5 +1,5 @@
 from config import MAX_HISTORY_MESSAGES
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 
 class StateManager:
     def __init__(self):
@@ -7,15 +7,10 @@ class StateManager:
         self.products: Dict[int, str] = {}
         self.user_states: Dict[int, str] = {}
         
-        # Данные текущей сессии
+        # Данные текущей сессии (НОВЫЕ ПОЛЯ)
         self.generated_dishes: Dict[int, List[dict]] = {} # Список блюд (для кнопок)
         self.available_categories: Dict[int, List[str]] = {} # Доступные категории
         self.current_dish: Dict[int, str] = {} # Последнее выбранное блюдо
-        
-        # НОВЫЕ ПОЛЯ ДЛЯ КОМПЛЕКСНЫХ ОБЕДОВ
-        self.complex_meals: Dict[int, List[dict]] = {} # Список комплексных обедов
-        self.current_complex_meal: Dict[int, dict] = {} # Текущий выбранный комплекс
-        self.complex_courses: Dict[int, List[dict]] = {} # Блюда в комплексе
 
     # --- ИСТОРИЯ ---
     def get_history(self, user_id: int) -> List[dict]:
@@ -60,7 +55,7 @@ class StateManager:
         if user_id in self.user_states:
             del self.user_states[user_id]
 
-    # --- КАТЕГОРИИ И БЛЮДА ---
+    # --- НОВОЕ: КАТЕГОРИИ И БЛЮДА ---
     def set_categories(self, user_id: int, categories: List[str]):
         self.available_categories[user_id] = categories
 
@@ -82,32 +77,7 @@ class StateManager:
     def get_current_dish(self, user_id: int) -> Optional[str]:
         return self.current_dish.get(user_id)
 
-    # --- НОВОЕ: КОМПЛЕКСНЫЕ ОБЕДЫ ---
-    def set_complex_meals(self, user_id: int, complex_meals: List[dict]):
-        self.complex_meals[user_id] = complex_meals
-
-    def get_complex_meals(self, user_id: int) -> List[dict]:
-        return self.complex_meals.get(user_id, [])
-
-    def set_current_complex_meal(self, user_id: int, complex_meal: dict):
-        self.current_complex_meal[user_id] = complex_meal
-
-    def get_current_complex_meal(self, user_id: int) -> Optional[dict]:
-        return self.current_complex_meal.get(user_id)
-
-    def set_complex_courses(self, user_id: int, courses: List[dict]):
-        self.complex_courses[user_id] = courses
-
-    def get_complex_courses(self, user_id: int) -> List[dict]:
-        return self.complex_courses.get(user_id, [])
-
-    def get_complex_course(self, user_id: int, course_index: int) -> Optional[dict]:
-        courses = self.get_complex_courses(user_id)
-        if 0 <= course_index < len(courses):
-            return courses[course_index]
-        return None
-
-    # --- ОЧИСТКА ---
+    # --- ОЧИСТКА (ВОТ ЭТОГО МЕТОДА НЕ ХВАТАЛО) ---
     def clear_session(self, user_id: int):
         if user_id in self.history: del self.history[user_id]
         if user_id in self.products: del self.products[user_id]
@@ -115,10 +85,5 @@ class StateManager:
         if user_id in self.generated_dishes: del self.generated_dishes[user_id]
         if user_id in self.available_categories: del self.available_categories[user_id]
         if user_id in self.current_dish: del self.current_dish[user_id]
-        
-        # Очистка комплексных обедов
-        if user_id in self.complex_meals: del self.complex_meals[user_id]
-        if user_id in self.current_complex_meal: del self.current_complex_meal[user_id]
-        if user_id in self.complex_courses: del self.complex_courses[user_id]
 
 state_manager = StateManager()
