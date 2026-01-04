@@ -131,7 +131,7 @@ class GroqService:
             pass
         return ["mix", "main", "soup", "salad"] if mix_available else ["main", "soup"]
 
-        @staticmethod
+    @staticmethod
     async def generate_dishes_list(products: str, category: str) -> List[Dict[str, str]]:
         safe_products = GroqService._sanitize_input(products, max_length=400)
         base_instruction = "⚠️ ВАЖНО: соль, сахар, вода, масло и специи ДОСТУПНЫ ВСЕГДА."
@@ -169,7 +169,6 @@ class GroqService:
             return json.loads(GroqService._extract_json(res))
         except:
             return []
-
 
     @staticmethod
     async def generate_recipe(dish_name: str, products: str) -> str:
