@@ -1,6 +1,6 @@
 from groq import AsyncGroq
 from config import GROQ_API_KEY, GROQ_MODEL
-from typing import Dict, List
+from typing import Dict, List, Optional
 import json
 import re
 import logging
@@ -10,162 +10,550 @@ logger = logging.getLogger(__name__)
 
 class GroqService:
     
+    # Конфигурация параметров LLM для разных типов задач
+    LLM_CONFIG = {
+        "validation": {"temperature": 0.1, "max_tokens": 200},
+        "categorization": {"temperature": 0.2, "max_tokens": 500},
+        "generation": {"temperature": 0.5, "max_tokens": 1500},
+        "recipe": {"temperature": 0.4, "max_tokens": 2500},
+        "freestyle": {"temperature": 0.6, "max_tokens": 2000}
+    }
+    
     @staticmethod
-    async def _send_groq_request(system_prompt: str, user_text: str, temperature: float = 0.5, max_tokens: int = 1500) -> str:
+    def _sanitize_input(text: str, max_length: int = 500) -> str:
+        """
+        Безопасная обработка пользовательского ввода для вставки в промпты.
+        
+        Args:
+            text: Входной текст от пользователя
+            max_length: Максимальная длина после обработки
+            
+        Returns:
+            Очищенный безопасный текст
+        """
+        if not text:
+            return ""
+        
+        # Удаляем или заменяем потенциально опасные символы
+        sanitized = text.strip()
+        
+        # Заменяем кавычки на безопасные
+        sanitized = sanitized.replace('"', "'").replace('`', "'")
+        
+        # Удаляем управляющие символы и переносы строк
+        sanitized = re.sub(r'[\r\n\t]', ' ', sanitized)
+        
+        # Удаляем множественные пробелы
+        sanitized = re.sub(r'\s+', ' ', sanitized)
+        
+        # Обрезаем до максимальной длины
+        if len(sanitized) > max_length:
+            sanitized = sanitized[:max_length] + "..."
+            
+        return sanitized
+    
+    @staticmethod
+    async def _send_groq_request(
+        system_prompt: str, 
+        user_text: str, 
+        task_type: str = "generation",
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
+    ) -> str:
         try:
+            # Получаем конфигурацию для типа задачи
+            config = GroqService.LLM_CONFIG.get(task_type, GroqService.LLM_CONFIG["generation"])
+            
+            # Используем переданные параметры или значения по умолчанию из конфига
+            final_temperature = temperature if temperature is not None else config["temperature"]
+            final_max_tokens = max_tokens if max_tokens is not None else config["max_tokens"]
+            
             response = await client.chat.completions.create(
                 model=GROQ_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_text}
                 ],
-                max_tokens=max_tokens,
-                temperature=temperature
+                max_tokens=final_max_tokens,
+                temperature=final_temperature
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            logger.error(f"Kitchen Order Error: {e}")
+            logger.error(f"Groq API Error: {e}")
             return ""
 
     @staticmethod
     def _extract_json(text: str) -> str:
         text = text.replace("```json", "").replace("```", "")
+        
         start_brace = text.find('{')
         start_bracket = text.find('[')
-        if start_brace == -1: start = start_bracket
-        elif start_bracket == -1: start = start_brace
-        else: start = min(start_brace, start_bracket)
+        
+        if start_brace == -1:
+            start = start_bracket
+        elif start_bracket == -1:
+            start = start_brace
+        else:
+            start = min(start_brace, start_bracket)
+        
         end_brace = text.rfind('}')
         end_bracket = text.rfind(']')
         end = max(end_brace, end_bracket)
+        
         if start != -1 and end != -1 and end > start:
             return text[start:end+1]
+        
         return text.strip()
 
-    FLAVOR_RULES = """
-    🍽 THE ART OF PLATING & TASTE:
-    🎭 CONTRAST (The Soul of the Dish):
-    • Fat + Acid (Pork + Sauerkraut)
-    • Sweet + Salty (Watermelon + Feta)
-    • Soft + Crunchy (Cream soup + Croutons)
-    ✨ SYNERGY (Flavor Boosting):
-    • Tomato + Basil | Fish + Dill + Lemon | Pumpkin + Cinnamon
-    👑 THE PROTAGONIST: One "King" ingredient per dish.
-    ✅ CHEF'S CLASSICS: Tomato+Basil+Garlic | Lamb+Rosemary/Mint
-    ❌ CULINARY TABOOS: Fish + Dairy (hot) | Heavy Protein Overload 🥩+🍗
-    """
+    # --- ПРАВИЛА СОЧЕТАЕМОСТИ (константа) ---
+    FLAVOR_RULES = """❗️ ПРАВИЛА СОЧЕТАЕМОСТИ:
+
+🎭 КОНТРАСТЫ (создают интерес):
+• Жирное + Кислое (свинина + квашеная капуста)
+• Сладкое + Солёное (арбуз + брынза)
+• Мягкое + Хрустящее (крем-суп + гренки)
+
+✨ УСИЛЕНИЕ (схожие вкусы):
+• Помидор + Базилик
+• Рыба + Укроп + Лимон
+• Тыква + Корица
+
+👑 ОДИН ГЛАВНЫЙ ИНГРЕДИЕНТ:
+В каждом блюде — один "король", остальное — "свита"
+
+✅ ПРОВЕРЕННЫЕ ПАРЫ:
+• Помидор + Базилик + Чеснок
+• Баранина + Розмарин/Мята
+• Сыр + Орехи/Мёд
+
+❌ КУЛИНАРНЫЕ ТАБУ:
+• Рыба 🐟 + Молочные продукты 🥛 (в горячих блюдах)
+• Два сильных мяса 🥩+🍗 в одной композиции
+"""
 
     @staticmethod
     async def validate_ingredients(text: str) -> bool:
-        # Используем {{ }} для JSON, чтобы f-строка не ломалась
-        prompt = f"""You are the Head of Food Quality Control. Audit the incoming delivery list for freshness and safety.
+        prompt = """Ты эксперт по безопасности продуктов. Проверь текст на валидность.
 
-📋 INSPECTION CRITERIA:
-✅ ACCEPT (Fresh Delivery) if:
-- Edible products (meats, veggies, grains, dairy, etc.)
-- Minor typos allowed ("patato", "milkk")
-- General culinary categories ("herbs", "spices")
+📋 КРИТЕРИИ ВАЛИДНОСТИ:
+✅ ПРИНЯТЬ если:
+- Съедобные продукты (мясо, овощи, крупы, молоко и т.д.)
+- Допустимы опечатки ("карртофель", "молко")
+- Допустимы общие категории ("зелень", "специи")
 
-❌ REJECT (Hazardous/Spoiled) if:
-- Inedible items (gasoline, glass, chemicals)
-- Foul language, kitchen slurs, or toxicity
-- Gibberish, greeting-only, or empty crates
+❌ ОТКЛОНИТЬ если:
+- Несъедобное (бензин, стекло, химикаты)
+- Ругательства, жаргон и мат (жопа, тварь, блядь, хуй)
+- Бессмыслица ("абракадабра", "фыва олдж")
+- Только приветствия ("привет", "hello")
+- Пустой ввод или <3 символов
 
-🎯 REPORT FORMAT (STRICT JSON, language: Russian):
-{{
-  "valid": true,
-  "reason": "короткое пояснение на русском"
-}}
+🎯 СТРОГИЙ ФОРМАТ ОТВЕТА:
+{"valid": true, "reason": "краткая причина"}
+или
+{"valid": false, "reason": "краткая причина"}
 
-🚨 CRITICAL: Response must start with "{{" and end with "}}".
+🚨 КРИТИЧЕСКИ ВАЖНО:
+Ответ должен начинаться с "{" и заканчиваться "}"
+НЕ добавляй:
+- Вводные фразы ("Вот JSON:", "Конечно!")
+- Markdown (```json```)
+- Пояснения после JSON
+
+ПЕРВЫЙ символ ответа = "{"
+ПОСЛЕДНИЙ символ ответа = "}"
 """
-        res = await GroqService._send_groq_request(prompt, f'📝 Batch to inspect: "{text}"', 0.1)
+        
+        # Санитизация входного текста
+        safe_text = GroqService._sanitize_input(text, max_length=200)
+        
+        res = await GroqService._send_groq_request(
+            prompt, 
+            f'📝 Анализируемый текст: "{safe_text}"', 
+            task_type="validation"
+        )
+        
         try:
             clean_json = GroqService._extract_json(res)
             data = json.loads(clean_json)
             return data.get("valid", False)
-        except:
+        except Exception as e:
+            logger.error(f"Validation JSON Error: {e}, Response: {res}")
             return "true" in res.lower()
 
     @staticmethod
-    async def analyze_categories(products: str) -> List[str]:
-        items_count = len(re.split(r'[,;]', products))
-        mix_rule = '- "mix" (Full Course)' if items_count >= 5 else '⚠️ "mix" NOT AVAILABLE'
-        
-        prompt = f"""You are a Menu Architect. Categorize available items.
-🛒 CURRENT PANTRY: {products}
-📦 STAPLES: salt, sugar, water, oil, spices
-📚 SECTIONS: "soup", "main", "salad", "breakfast", "dessert", "drink", "snack", "mix"
-{mix_rule}
-⚠️ KITCHEN POLICIES: Return 2-4 most logical sections.
-🎯 FORMAT: ["section1", "section2"] (JSON ONLY)
-"""
-        res = await GroqService._send_groq_request(prompt, "Organize the pantry", 0.2)
-        try:
-            data = json.loads(GroqService._extract_json(res))
-            return data if isinstance(data, list) else ["main"]
-        except:
-            return ["main"]
+async def analyze_categories(products: str) -> List[str]:
+    # Санитизация входных продуктов
+    safe_products = GroqService._sanitize_input(products, max_length=300)
+    
+    # Улучшенный подсчет продуктов - игнорируем скобки и служебные слова
+    # Разделяем по запятым и точкам с запятой, удаляем лишние пробелы
+    items = [item.strip() for item in re.split(r'[,;]', safe_products) if item.strip()]
+    
+    # Фильтруем пустые элементы и слишком короткие (менее 2 букв)
+    items = [item for item in items if len(item) > 1]
+    
+    items_count = len(items)
+    
+    # Более гибкая логика для mix
+    if items_count >= 5:
+        mix_available = True
+        if items_count >= 7:  # Снизили с 8 до 7 для полноценного обеда
+            mix_type = "full"
+            mix_rule = """- "mix" (полноценный обед: Суп + Второе + Напиток/Салат)
+⚠️ "mix" рекомендуется если продуктов ≥7"""
+        else:
+            mix_type = "light"  
+            mix_rule = """- "mix" (лёгкий обед: 2 сочетающихся блюда)
+⚠️ "mix" рекомендуется если продуктов ≥5"""
+    else:
+        # Для 3-4 продуктов все еще можно предложить mix
+        mix_available = items_count >= 3
+        mix_rule = """- "mix" (минимальный обед: простое сочетание)
+⚠️ "mix" возможен если продуктов ≥3"""
+    
+    # Создаем более убедительный промпт
+    prompt = f"""Ты опытный шеф-повар. Определи категории блюд, которые МОЖНО приготовить.
 
+🛒 ПРОДУКТЫ: {safe_products}
+📦 БАЗА (всегда доступна): соль, сахар, вода, подсолнечное масло, специи, лёд
+📊 Количество продуктов: {items_count}
+
+📚 КАТЕГОРИИ (в порядке приоритета):
+1. "mix" — комплексные обеды (сеты) — ВСЕГДА добавляй если продуктов достаточно!
+2. Другие подходящие категории (2-3 штуки)
+
+{mix_rule}
+
+Другие категории (если подходят):
+- "soup" (супы — если есть овощи/мясо для бульона)
+- "main" (вторые блюда — если есть мясо/рыба/крупы)
+- "salad" (салаты — если есть свежие овощи)
+- "breakfast" (завтраки — если есть яйца/молоко/хлеб)
+- "dessert" (десерты — если есть сахар + фрукты/молоко)
+- "drink" (напитки — если есть фрукты/чай/кофе)
+- "snack" (закуски — для быстрых блюд)
+
+🎯 ВАЖНЫЕ ПРАВИЛА:
+1. "mix" ДОЛЖЕН быть в ответе если продуктов ≥3
+2. После "mix" добавь 1-3 другие подходящие категории
+3. Итого 2-4 категории в ответе
+
+📖 ПРИМЕРЫ (СТРОГО СЛЕДУЙ ЭТИМ ФОРМАТАМ):
+Продукты: "курица, рис, лук" → ["mix", "main"]
+Продукты: "курица, картофель, морковь, лук" → ["mix", "soup", "main"]
+Продукты: "курица, картофель, морковь, лук, рис" → ["mix", "soup", "main"]
+Продукты: "говядина, картофель, морковь, лук, капуста, рис, помидоры" → ["mix", "soup", "main", "salad"]
+
+🎯 ФОРМАТ ОТВЕТА (ТОЛЬКО JSON):
+["mix", "категория2", "категория3"]
+
+🚨 КРИТИЧЕСКИ ВАЖНО:
+1. ПЕРВЫЙ символ ответа = "["
+2. "mix" ДОЛЖЕН быть ПЕРВЫМ элементом если продуктов ≥3
+3. ПОСЛЕДНИЙ символ ответа = "]"
+4. БЕЗ текста до/после JSON!
+"""
+    
+    res = await GroqService._send_groq_request(
+        prompt, 
+        "Определи категории. Mix ВСЕГДА первым если возможно!", 
+        task_type="categorization",
+        temperature=0.1  # Снижаем температуру для более предсказуемых ответов
+    )
+    
+    try:
+        clean_json = GroqService._extract_json(res)
+        data = json.loads(clean_json)
+        if isinstance(data, list):
+            # Проверяем, есть ли mix и достаточно ли продуктов
+            if "mix" in data and not mix_available and items_count < 3:
+                data.remove("mix")
+                logger.warning(f"Removed 'mix' category: not enough products ({items_count} < 3)")
+            
+            # Если mix не добавлен, но продуктов достаточно - добавляем
+            if "mix" not in data and mix_available:
+                data.insert(0, "mix")
+                logger.info(f"Added 'mix' category for {items_count} products")
+            
+            return data
+    except Exception as e:
+        logger.error(f"Categories JSON Error: {e}, Response: {res}")
+    
+    # Fallback: если что-то пошло не так, возвращаем mix если продуктов достаточно
+    return ["mix", "main"] if items_count >= 3 else ["main"]
     @staticmethod
     async def generate_dishes_list(products: str, category: str) -> List[Dict[str, str]]:
-        items_count = len(re.split(r'[,]', products))
-        target_count = 5 if items_count < 7 else 7
+        # Санитизация входных продуктов
+        safe_products = GroqService._sanitize_input(products, max_length=400)
+        
+        items_count = len(re.split(r'[,]', safe_products))
+        
+        if category == "mix":
+            if items_count >= 8:
+                target_count = 4
+                dishes_per_set = 3
+                mix_type_desc = "ПОЛНОЦЕННЫЙ ОБЕД (3 блюда): Суп + Второе + Напиток/Салат"
+                combinations = "- Суп + Второе + Напиток\n- Суп + Второе + Салат\n- Суп + Салат + Напиток"
+            elif items_count >= 5:
+                target_count = 5
+                dishes_per_set = 2
+                mix_type_desc = "ЛЁГКИЙ ОБЕД (2 блюда)"
+                combinations = "- Суп + Второе\n- Второе + Салат\n- Второе + Напиток\n- Суп + Салат"
+            else:
+                return []
+            
+            mix_specific = f"""
+🍱 {mix_type_desc}
 
-        prompt = f"""You are the Sous-Chef designing Specials for the "{category}" section.
-🛒 INGREDIENTS: {products}
+🔹 ВОЗМОЖНЫЕ КОМБИНАЦИИ ({dishes_per_set} блюда):
+{combinations}
+
+🔹 РЕАЛИСТИЧНОЕ РАСПРЕДЕЛЕНИЕ:
+• Мясо/рыба: используй в 1-2 блюдах (не во всех!)
+• Овощи: распределяй логично между блюдами
+• База (соль, масло, вода): не считаются в продуктах
+
 {GroqService.FLAVOR_RULES}
 
-🎯 TASK:
-- Generate EXACTLY {target_count} appetizing dishes.
-- Use only pantry items + staples.
-- WRITE NAMES IN INPUT LANGUAGE AND DESCRIPTIONS IN RUSSIAN (на русском языке).
+🔹 ЛОГИКА СОЧЕТАНИЙ ДЛЯ СЕТОВ:
+• Рыбный день: рыбный суп → рыбное второе
+• Мясной день: мясной суп → мясное второе
+• Сезонность: учитывай время года
+• Контраст текстур: мягкое + хрустящее в разных блюдах
 
-🎯 FORMAT (JSON ONLY):
+❌ НЕЛЬЗЯ В СЕТЕ:
+• Дублировать основной ингредиент во ВСЕХ блюдах
+• Делать два супа или два вторых в одном сете
+• Использовать ВСЕ продукты в одном блюде
+• Нарушать правила сочетаемости (см. выше)
+"""
+            
+            prompt = f"""📝 ЗАДАНИЕ: Составь варианты КОМПЛЕКСНЫХ ОБЕДОВ (сетов).
+
+🛒 ПРОДУКТЫ: {safe_products}
+📦 БАЗА: соль, сахар, вода, масло, специи
+
+🎯 ТРЕБОВАНИЯ:
+- Количество комплексных обедов: СТРОГО {target_count}
+- Каждый обед = {dishes_per_set} сочетающихся блюда
+- СЛЕДУЙ ПРАВИЛАМ СОЧЕТАЕМОСТИ (см. ниже)
+- Название: "Обед №X: [Блюдо] + [Блюдо]" (для 3 блюд: "... + [Блюдо] + [Блюдо]")
+- Описание: Перечисли ВСЕ блюда в сете и их краткий состав
+{mix_specific}
+
+📖 ПРИМЕР ФОРМАТА ДЛЯ {dishes_per_set} БЛЮД:
 [
   {{
-    "name": "Название блюда",
-    "desc": "Аппетитное описание"
+    "name": "Обед №1: Куриный суп + Картофельное пюре с котлетой"{" + Компот из яблок" if dishes_per_set == 3 else ""},
+    "desc": "Куриный суп с вермишелью и морковью. Картофельное пюре с куриной котлетой.{" Компот из свежих яблок." if dishes_per_set == 3 else ""}"
   }}
 ]
+
+🚨 ВАЖНО: Каждый элемент в списке — это ЦЕЛЫЙ КОМПЛЕКСНЫЙ ОБЕД (сет), а не отдельное блюдо!
 """
-        res = await GroqService._send_groq_request(prompt, "Draft the menu", 0.5)
+        
+        else:
+            if items_count <= 3:
+                target_count = 4
+            elif items_count <= 6:
+                target_count = 5
+            elif items_count <= 10:
+                target_count = 6
+            else:
+                target_count = 7
+
+            cat_names = {
+                "soup": "Супы", "main": "Вторые блюда", "salad": "Салаты", 
+                "breakfast": "Завтраки", "dessert": "Десерты", "drink": "Напитки", 
+                "snack": "Закуски", "mix": "Комплексные обеды"
+            }
+            cat_ru = cat_names.get(category, "Блюда")
+            
+            prompt = f"""📝 ЗАДАНИЕ: Составь меню категории "{cat_ru}".
+
+🛒 ПРОДУКТЫ: {safe_products}
+📦 БАЗА: соль, сахар, вода, масло, специи
+
+{GroqService.FLAVOR_RULES}
+
+🎯 ТРЕБОВАНИЯ:
+- Количество блюд: СТРОГО {target_count} (не больше, не меньше!)
+- Используй ТОЛЬКО продукты из списка + база
+- СЛЕДУЙ ПРАВИЛАМ СОЧЕТАЕМОСТИ (см. выше)
+- Названия — аппетитные, без сложных терминов
+- Описания — 1-2 предложения, вызывают аппетит
+
+📖 ПРИМЕР ФОРМАТА:
+[
+  {{
+    "name": "Куриный суп с лапшой",
+    "desc": "Ароматный бульон с нежной курицей и домашней лапшой. Согревает в холодный день."
+  }}
+]
+
+🚨 КРИТИЧЕСКИ ВАЖНО:
+ПЕРВЫЙ символ ответа = "["
+ПОСЛЕДНИЙ символ ответа = "]"
+СТРОГИЙ JSON! БЕЗ ТЕКСТА ДО/ПОСЛЕ!
+"""
+        
+        res = await GroqService._send_groq_request(
+            prompt, 
+            "Генерируй меню", 
+            task_type="generation"
+        )
+        
         try:
-            return json.loads(GroqService._extract_json(res))
-        except:
-            return []
+            clean_json = GroqService._extract_json(res)
+            data = json.loads(clean_json)
+            if isinstance(data, list):
+                return data
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e}, Response: {clean_json[:200]}...")
+        except Exception as e:
+            logger.error(f"Dishes JSON Error: {e}, Response: {res[:200]}...")
+        
+        return []
 
     @staticmethod
     async def generate_recipe(dish_name: str, products: str) -> str:
-        prompt = f"""You are the Executive Chef. Write a technical recipe card for: "{dish_name}".
-🛒 PANTRY: {products}
+        # Санитизация входных данных
+        safe_dish_name = GroqService._sanitize_input(dish_name, max_length=100)
+        safe_products = GroqService._sanitize_input(products, max_length=500)
+        
+        is_mix = any(x in safe_dish_name.lower() for x in ["обед", "сет", "комплекс", "№", "+"])
+        
+        if is_mix:
+            if safe_dish_name.count("+") >= 2:
+                dishes_in_set = 3
+            else:
+                dishes_in_set = 2
+            
+            mix_instruction = f"""
+🍱 ЭТО КОМПЛЕКСНЫЙ ОБЕД ИЗ {dishes_in_set} БЛЮД:
+
 {GroqService.FLAVOR_RULES}
 
-📋 RECIPE CARD FORMAT (WRITE EVERYTHING IN RUSSIAN):
-[Название блюда]
+🔹 ТРЕБОВАНИЯ ДЛЯ СЕТА:
+1. Приведи рецепты ВСЕХ {dishes_in_set} блюд, входящих в сет
+2. Для каждого блюда укажи ОТДЕЛЬНЫЕ ингредиенты и шаги приготовления
+3. Используй подзаголовки для каждого блюда: "[Название блюда 1]", "[Название блюда 2]"
+4. Рассчитай КБЖУ для ВСЕГО ОБЕДА (сумма всех блюд)
+5. Общее время приготовления = сумма времени всех блюд
+6. СОБЛЮДАЙ ПРАВИЛА СОЧЕТАЕМОСТИ при распределении продуктов
+
+🔹 РАСПРЕДЕЛЕНИЕ ПРОДУКТОВ:
+- Распредели продукты логично между блюдами, следуя правилам сочетаемости
+- Не дублируй основной ингредиент (мясо/рыбу) во всех блюдах
+- Создай гармоничный вкусовой ансамбль
+"""
+        else:
+            mix_instruction = f"""
+{GroqService.FLAVOR_RULES}
+
+🔹 СОБЛЮДАЙ ПРАВИЛА СОЧЕТАЕМОСТИ при составлении рецепта:
+- Учитывай баланс вкусов (контрасты и усиление)
+- Определи один главный ингредиент
+- Избегай кулинарных табу
+"""
+        
+        prompt = f"""Ты профессиональный шеф. Напиши рецепт: "{safe_dish_name}".
+
+🛒 ПРОДУКТЫ: {safe_products}
+📦 БАЗА (всегда доступна): соль, сахар, вода, подсолнечное масло, специи
+{mix_instruction}
+
+📋 СТРОГИЙ ФОРМАТ ОТВЕТА:
+
+[Название блюда или сета]
+
 📦 Ингредиенты:
 - [продукт] — [количество]
-📊 Пищевая ценность: ...
-⏱ Время: ...
+- [продукт] — [количество]
+{"(Для сета — отдельные списки ингредиентов для каждого блюда под подзаголовками)" if is_mix else ""}
+
+📊 Пищевая ценность на 1 порцию (примерно):
+🥚 Белки: X г
+🥑 Жиры: X г  
+🌾 Углеводы: X г
+⚡ Энерг. ценность: X ккал
+{"(Для сета — общая пищевая ценность ВСЕГО обеда)" if is_mix else ""}
+
+⏱ Время: X минут
+{"(Для сета — общее время приготовления всех блюд)" if is_mix else ""}
+🎚 Сложность: [низкая/средняя/высокая]
+👥 Порции: X чел.
+
 👨‍🍳 Приготовление:
-1. [Шаги приготовления]
-💡 CHEF'S SECRET: [Analyze Taste, Aroma and Texture. Recommend ONE missing item for balance]
+1. [подробный шаг]
+2. [подробный шаг]
+3. [подробный шаг]
+{"(Для сета — последовательные шаги приготовления ВСЕХ блюд)" if is_mix else ""}
+
+💡 СОВЕТ ШЕФ-ПОВАРА: [Analyze Taste, Aroma and Texture. Recommend ONE missing item for balance].
 """
-        res = await GroqService._send_groq_request(prompt, "Start cooking", 0.4, max_tokens=2500)
-        return res + "\n\n👨‍🍳 <b>Приятного аппетита!</b>" if not GroqService._is_refusal(res) else res
+
+        res = await GroqService._send_groq_request(
+            prompt, 
+            "Напиши рецепт", 
+            task_type="recipe"
+        )
+        
+        if GroqService._is_refusal(res): 
+            return res
+        
+        return res + "\n\n👨‍🍳 <b>Приятного аппетита!</b>"
 
     @staticmethod
     async def generate_freestyle_recipe(dish_name: str) -> str:
-        prompt = f"""You are a Culinary Philosopher. Create a recipe for: "{dish_name}"
-🔍 ANALYSIS: Food (standard recipe) vs Metaphor (allegory).
-📋 FORMAT: Write EVERYTHING in RUSSIAN.
-For food: standard card.
-For metaphors: symbolic ingredients and wise cooking steps.
+        # Санитизация названия блюда
+        safe_dish_name = GroqService._sanitize_input(dish_name, max_length=100)
+        
+        prompt = f"""Ты креативный шеф-повар. Создай рецепт для блюда: "{safe_dish_name}"
+
+📋 СТРОГИЙ ФОРМАТ ОТВЕТА:
+
+[Название блюда]
+
+📦 Ингредиенты:
+- [продукт] — [количество]
+- [продукт] — [количество]
+
+📊 Пищевая ценность (примерно):
+🥚 Белки: X г.
+🥑 Жиры: X г.
+🌾 Углеводы: X г.
+⚡ Калории: X ккал.
+
+⏱ Время: X мин.
+🎚 Сложность: [низкая/средняя/высокая]
+👥 Порций: X
+
+👨‍🍳 Приготовление:
+1. [подробный шаг]
+2. [подробный шаг]
+3. [подробный шаг]
+
+💡 СОВЕТ ШЕФА: [Analyze Taste, Aroma and Texture. Recommend ONE missing item for balance]
+
+⚠️ Создай только реальный кулинарный рецепт с использованием реальных пищевых ингредиентов.
 """
-        res = await GroqService._send_groq_request(prompt, "Compose creation", 0.6, max_tokens=2000)
-        return res + "\n\n👨‍🍳 <b>Приятного аппетита!</b>" if not GroqService._is_refusal(res) else res
+        
+        res = await GroqService._send_groq_request(
+            prompt, 
+            "Создай рецепт", 
+            task_type="freestyle"
+        )
+        
+        if GroqService._is_refusal(res):
+            return res
+        
+        return res + "\n\n👨‍🍳 <b>Приятного аппетита!</b>"
 
     @staticmethod
     def _is_refusal(text: str) -> bool:
-        refusals = ["cannot fulfill", "against policy", "kitchen closed", "не могу"]
-        return any(ph in text.lower() for ph in refusals) or "⛔" in text
+        if "⛔" in text:
+            return True
+        refusals = ["cannot fulfill", "cannot answer", "against my policy", "не могу выполнить"]
+        return any(ph in text.lower() for ph in refusals)
