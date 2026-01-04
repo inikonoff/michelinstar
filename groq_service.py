@@ -205,7 +205,7 @@ class GroqService:
 1. [шаг]
 2. [шаг]
 
-💡 СОВЕТ ШЕФ-ПОВАРА: [Анализ. Рекомендуй 1 ДОПОЛНИТЕЛЬНЫЙ продукт, которого нет в списке и в базе, для улучшения вкуса].
+💡 СОВЕТ ШЕФ-ПОВАРА: [Analyze Taste, Aroma, and Texture. Recommend one missing item not from the base for balance].
 """
         res = await GroqService._send_groq_request(prompt, "Напиши рецепт", task_type="recipe")
         if GroqService._is_refusal(res): return res
