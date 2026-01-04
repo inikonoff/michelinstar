@@ -89,15 +89,17 @@ class GroqService:
         try:
             data = json.loads(GroqService._extract_json(res))
             return data.get("valid", False)
-        except: return "true" in res.lower()
+        except:
+            return "true" in res.lower()
 
     @staticmethod
     async def analyze_categories(products: str) -> List[str]:
         safe_products = GroqService._sanitize_input(products, max_length=300)
-        items = [i.strip() for i in re.split(r'[,;]', safe_products) if len(i.strip()) > 1]
+
+        items = [i.strip() for i in re.split(r'[,;\n\.]', safe_products) if len(i.strip()) > 1]
         items_count = len(items)
-        mix_available = items_count >= 12
-        
+        mix_available = items_count >= 8
+
         prompt = f"""Ты шеф-повар. Определи категории блюд.
 🛒 ПРОДУКТЫ: {safe_products}
 📦 БАЗА (ВСЕГДА В НАЛИЧИИ): соль, сахар, вода, подсолнечное масло, специи.
@@ -116,10 +118,13 @@ class GroqService:
         try:
             data = json.loads(GroqService._extract_json(res))
             if isinstance(data, list):
-                if mix_available and "mix" not in data: data.insert(0, "mix")
-                elif not mix_available and "mix" in data: data = [item for item in data if item != "mix"]
+                if mix_available and "mix" not in data:
+                    data.insert(0, "mix")
+                elif not mix_available and "mix" in data:
+                    data = [item for item in data if item != "mix"]
                 return data[:4]
-        except: pass
+        except:
+            pass
         return ["mix", "main", "soup", "salad"] if mix_available else ["main", "soup"]
 
     @staticmethod
@@ -128,7 +133,6 @@ class GroqService:
         base_instruction = "⚠️ ВАЖНО: соль, сахар, вода, масло и специи ДОСТУПНЫ ВСЕГДА."
         
         if category == "mix":
-            # Используем {{ }} для JSON в f-строках
             prompt = f"""📝 ЗАДАНИЕ: Составь ОДИН комплексный обед из 4-х блюд.
 🛒 ПРОДУКТЫ: {safe_products}
 📦 БАЗА: соль, сахар, вода, масло, специи.
@@ -154,7 +158,8 @@ class GroqService:
         res = await GroqService._send_groq_request(prompt, "Генерируй меню", task_type="generation")
         try:
             return json.loads(GroqService._extract_json(res))
-        except: return []
+        except:
+            return []
 
     @staticmethod
     async def generate_recipe(dish_name: str, products: str) -> str:
@@ -205,7 +210,8 @@ class GroqService:
 Порекомендуй ровно один ингредиент, которого нет в списке, для улучшения этой триады.
 """
         res = await GroqService._send_groq_request(prompt, "Напиши рецепт", task_type="recipe")
-        if GroqService._is_refusal(res): return res
+        if GroqService._is_refusal(res):
+            return res
         return res + "\n\n👨‍🍳 <b>Приятного аппетита!</b>"
 
     @staticmethod
@@ -218,7 +224,8 @@ class GroqService:
 📦 Ингредиенты: ...
 📊 КБЖУ ... ⏱ Время ... 🪦 Сложность ... 👥 Порции ... 👨‍🍳 Приготовление ... 💡 СОВЕТ ШЕФА ..."""
         res = await GroqService._send_groq_request(prompt, "Создай рецепт", task_type="freestyle")
-        if GroqService._is_refusal(res): return res
+        if GroqService._is_refusal(res):
+            return res
         return res + "\n\n👨‍🍳 <b>Приятного аппетита!</b>"
 
     @staticmethod
