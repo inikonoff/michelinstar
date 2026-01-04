@@ -69,7 +69,6 @@ def get_hide_keyboard():
 
 async def cmd_start(message: Message):
     state_manager.clear_session(message.from_user.id)
-    # Эти строки ДОЛЖНЫ быть с отступом (внутри функции)
     text = (
         "👋 Здравствуйте.\n\n"
         "🎤 Отправьте голосовое или текстовое сообщение с перечнем продуктов на русском или иностранном языке, и я подскажу, что из них можно приготовить.\n"
@@ -204,7 +203,17 @@ async def show_dishes_for_category(message: Message, user_id: int, products: str
     state_manager.add_message(user_id, "bot", response_text)
     
     await wait.delete()
-    await message.answer(response_text, reply_markup=get_dishes_keyboard(dishes_list), parse_mode="HTML")
+    
+    # НОВОЕ: Если это комплексный обед, показываем только одну кнопку
+    if category == "mix":
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📖 Получить рецепты обеда", callback_data="dish_all_mix")],
+            [InlineKeyboardButton(text="⬅️ Назад к категориям", callback_data="back_to_categories")]
+        ])
+    else:
+        kb = get_dishes_keyboard(dishes_list)
+        
+    await message.answer(response_text, reply_markup=kb, parse_mode="HTML")
 
 async def generate_and_send_recipe(message: Message, user_id: int, dish_name: str):
     wait = await message.answer(f"👨‍🍳 Пишу рецепт: <b>{dish_name}</b>...", parse_mode="HTML")
@@ -270,8 +279,14 @@ async def handle_callback(callback: CallbackQuery):
     # 5. Выбор блюда
     if data.startswith("dish_"):
         try:
-            index = int(data.split("_")[1])
-            dish_name = state_manager.get_generated_dish(user_id, index)
+            # НОВОЕ: Обработка комплексного обеда
+            if data == "dish_all_mix":
+                dishes = state_manager.get_generated_dishes(user_id)
+                dish_name = " + ".join([d['name'] for d in dishes])
+            else:
+                index = int(data.split("_")[1])
+                dish_name = state_manager.get_generated_dish(user_id, index)
+            
             if not dish_name:
                 await callback.answer("Меню устарело.")
                 return
