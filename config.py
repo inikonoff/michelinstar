@@ -8,12 +8,14 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 
+# --- НОВОЕ: Подключение к БД ---
+# На Render это будет в Environment Variables.
+# Для локального теста вставьте строку из Supabase (Connection String -> URI)
+DATABASE_URL = os.getenv("DATABASE_URL") 
+
 # Настройки
 SPEECH_LANGUAGE = "ru-RU"
-
-# ОБНОВЛЕННАЯ МОДЕЛЬ (Llama 3.3)
 GROQ_MODEL = "llama-3.3-70b-versatile"
-
 GROQ_MAX_TOKENS = 2000
 
 # Папки
