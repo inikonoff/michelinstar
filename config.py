@@ -1,5 +1,3 @@
-[file name]: config.py
-[file content begin]
 import os
 from dotenv import load_dotenv
 
@@ -25,4 +23,3 @@ TEMP_DIR = "temp"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 MAX_HISTORY_MESSAGES = 8
-[file content end]
