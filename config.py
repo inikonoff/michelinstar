@@ -8,10 +8,10 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 
-# --- НОВОЕ: Подключение к БД ---
-# На Render это будет в Environment Variables.
-# Для локального теста вставьте строку из Supabase (Connection String -> URI)
-DATABASE_URL = os.getenv("DATABASE_URL") 
+# База данных (используем ТОЧНО тот же формат что в генераторе паролей)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL не найден в переменных окружения!")
 
 # Настройки
 SPEECH_LANGUAGE = "ru-RU"
