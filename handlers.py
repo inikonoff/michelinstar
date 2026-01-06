@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from utils import VoiceProcessor
 from groq_service import GroqService
-from state_manager_db import state_manager  # Импортируем НОВЫЙ state_manager с БД
+from state_manager import state_manager  # Импортируем НОВЫЙ state_manager с БД
 from database import db  # Импортируем для команд
 
 # Инициализация
