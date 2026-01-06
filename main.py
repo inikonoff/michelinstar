@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from config import TELEGRAM_TOKEN
 from handlers import register_handlers
-from state_manager_db import state_manager
+from state_manager import state_manager
 from aiohttp import web
 from database import db
 
