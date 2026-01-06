@@ -6,5 +6,5 @@ requests==2.32.3
 aiohttp==3.10.5
 python-dotenv
 sqlalchemy==2.0.25
-asyncpg==0.29.0
+asyncpg==0.29.0  # <--- ДОБАВЛЯЕМ
 greenlet==3.0.3
