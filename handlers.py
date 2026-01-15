@@ -526,7 +526,11 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(handle_direct_recipe, F.text.lower().startswith("дай рецепт"))
     dp.message.register(handle_direct_recipe, F.text.lower().startswith("рецепт"))
     dp.message.register(handle_direct_recipe, F.text.lower().startswith("как приготовить"))
-
-dp.message.register(handle_voice, F.voice)
-dp.message.register(
-  
+    
+    # Затем обработчики контента
+    dp.message.register(handle_voice, F.voice)
+    dp.message.register(handle_text, F.text)  # Общий обработчик текста ПОСЛЕ специфичных
+    
+    # Callback обработчики
+    dp.callback_query.register(handle_delete_msg, F.data == "delete_msg")
+    dp.callback_query.register(handle_callback)
